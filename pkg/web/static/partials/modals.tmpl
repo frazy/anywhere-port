@@ -1,0 +1,173 @@
+{{define "modals"}}
+<!-- Edit Modal -->
+<div class="modal fade" id="editModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">限制配置</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-id">
+                <div class="mb-3">
+                    <label class="form-label">限速 (KB/s)</label>
+                    <input type="number" class="form-control" id="edit-speed">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">流量配额 (MB)</label>
+                    <input type="number" class="form-control" id="edit-quota">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">备注</label>
+                    <input type="text" class="form-control" id="edit-comment">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" onclick="saveEdit()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-body text-center py-4">
+                <p class="mb-3 text-danger fw-bold">⚠️ 确认删除此规则？</p>
+                <input type="hidden" id="delete-id">
+                <div class="d-flex justify-content-center gap-2">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-danger" onclick="confirmDelete()">删除</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Register Node Modal -->
+<div class="modal fade" id="registerModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">注册新节点</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="reg-form-area">
+                    <form id="registerForm">
+                        <div class="mb-3">
+                            <label class="form-label">节点 ID</label>
+                            <input type="text" class="form-control" id="reg-id" placeholder="e.g. Office-PC-01" required>
+                            <div class="form-text">建议使用英文、数字和连字符。</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">备注</label>
+                            <input type="text" class="form-control" id="reg-comment" placeholder="可选备注">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label d-block">操作系统</label>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="reg-os" id="reg-os-linux" value="linux" checked>
+                                <label class="form-check-label" for="reg-os-linux">Linux</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="radio" name="reg-os" id="reg-os-windows" value="windows">
+                                <label class="form-check-label" for="reg-os-windows">Windows</label>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="reg-is-backup">
+                                <label class="form-check-label" for="reg-is-backup">作为冗余备份节点</label>
+                            </div>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">生成 Token</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div id="reg-result" style="display: none;">
+                    <div class="alert alert-success text-center">
+                        <strong>注册成功！</strong>
+                    </div>
+                    <p class="small text-muted mb-2">请在目标机器上执行以下命令启动 Agent：</p>
+                    <div class="input-group mb-3">
+                        <input type="text" class="form-control form-control-sm font-monospace" id="reg-command" readonly>
+                        <button class="btn btn-outline-secondary btn-sm px-2 d-flex align-items-center"
+                            onclick="copyCommand()" title="复制">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
+                                viewBox="0 0 16 16">
+                                <path
+                                    d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z" />
+                                <path
+                                    d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="text-center mt-3">
+                        <button type="button" class="btn btn-link btn-sm text-decoration-none"
+                            onclick="openRegister()">注册下一个</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Node ID/Comment Edit Modal -->
+<div class="modal fade" id="nodeEditModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">修改节点信息</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="node-edit-id">
+                <div class="mb-3">
+                    <label class="form-label">节点备注</label>
+                    <input type="text" class="form-control" id="node-edit-comment" placeholder="更新备注名">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label d-block">操作系统</label>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="node-edit-os" id="node-edit-os-linux" value="linux">
+                        <label class="form-check-label" for="node-edit-os-linux">Linux</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="node-edit-os" id="node-edit-os-windows" value="windows">
+                        <label class="form-check-label" for="node-edit-os-windows">Windows</label>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="node-edit-is-backup">
+                        <label class="form-check-label" for="node-edit-is-backup">设置为备份节点</label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" onclick="saveNodeEdit()">保存修改</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Confirm Modal -->
+<div class="modal fade" id="confirmModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-body text-center py-4">
+                <h5 class="mb-3" id="confirm-title">确认操作</h5>
+                <p class="text-secondary small mb-4" id="confirm-msg">确认执行此操作吗？</p>
+                <div class="d-flex justify-content-center gap-2">
+                    <button type="button" class="btn btn-light btn-sm px-4" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary btn-sm px-4" id="confirm-ok-btn">确定</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}

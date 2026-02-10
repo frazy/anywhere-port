@@ -1,0 +1,15 @@
+{{define "common"}}
+<!-- Notifications (Toasts) -->
+<div class="position-fixed top-0 start-50 translate-middle-x p-3" style="z-index: 2000;">
+    <div id="success-toast" class="alert alert-success shadow-sm mb-2" style="display: none; min-width: 200px;">
+        <div class="d-flex align-items-center">
+            <span id="success-msg">Success</span>
+        </div>
+    </div>
+    <div id="error-toast" class="alert alert-danger shadow-sm mb-2" style="display: none; min-width: 200px;">
+        <div class="d-flex align-items-center">
+            <span id="error-msg">Error</span>
+        </div>
+    </div>
+</div>
+{{end}}

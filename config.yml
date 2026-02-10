@@ -1,0 +1,18 @@
+# AnywherePort 配置文件
+
+# Web 管理面板监听地址
+web_addr: ":9090"
+
+# 外部可达地址 (Host:Port) - 用于生成 Agent 连接脚本
+# 如果配置了反向代理 (Nginx/Caddy) 开启 HTTPS，请填写 "https://your.domain.com"
+public_addr: "127.0.0.1:9090"
+
+# 数据存储目录 (默认为 ./data)
+data_dir: "./data"
+
+# 认证配置
+auth:
+  username: "admin"
+  password: "passworD123"
+  max_login_attempts: 3
+  block_duration: "30m"

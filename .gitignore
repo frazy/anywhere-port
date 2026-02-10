@@ -1,0 +1,12 @@
+/.idea/
+/dist/awport-*
+/dist/config.yml
+/data/
+*.exe
+*.log
+backups/
+tmp/
+.agent/
+.gemini/
+.air.*.toml
+/dev.bat
