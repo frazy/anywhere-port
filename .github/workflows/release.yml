@@ -1,0 +1,49 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build and Release
+    # 仅当提交信息中包含 [release] 关键词时才执行
+    if: contains(github.event.head_commit.message, '[release]')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Build Master
+        run: |
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o dist/awport-master_linux_amd64 ./cmd/master
+
+      - name: Build Agent
+        run: |
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o dist/awport-agent_linux_amd64 ./cmd/agent
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest Release
+          body: |
+            Automated build for AnywherePort.
+          draft: false
+          prerelease: false
+          files: |
+            dist/awport-master_linux_amd64
+            dist/awport-agent_linux_amd64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
