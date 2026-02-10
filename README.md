@@ -67,8 +67,8 @@ Master 负责 Web 管理界面、认证以及协调各 Agent 节点。
 # Web 管理面板监听地址
 web_addr: ":9090"
 
-# 外部可达地址 (Host:Port) - 用于自动生成 Agent 连接脚本
-public_addr: "your-ip-or-domain:9090"
+# 外部可达地址 (需包含协议) - 用于自动生成 Agent 连接脚本
+public_addr: "http://your-ip-or-domain:9090"
 
 # 数据存储目录 (默认为 ./data)
 data_dir: "./data"
