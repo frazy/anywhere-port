@@ -34,7 +34,7 @@ type Server struct {
 
 const (
 	defaultLinuxTpl = `#!/bin/bash
-# Anywhere-Port Installer for Linux (Internal Fallback)
+set -e
 MASTER="{{.MasterAddr}}"
 ID="{{.AgentID}}"
 TOKEN="{{.Token}}"
@@ -46,59 +46,86 @@ echo "Master: $MASTER"
 echo "ID:     $ID"
 
 WORK_DIR="$HOME/anywhere-port"
+PID_FILE="$WORK_DIR/agent.pid"
+BINARY="$WORK_DIR/awport-agent"
+TMP_BINARY="$WORK_DIR/awport-agent.new"
 mkdir -p "$WORK_DIR"
-cd "$WORK_DIR"
+cd "$WORK_DIR" || exit 1
 
-# 1. 下载 Agent
-echo "Downloading agent from $DOWNLOAD_URL..."
+# 1. Download to temp file first (avoids "Text file busy")
+echo "Downloading agent..."
 if command -v curl &> /dev/null; then
-    curl -sL "$DOWNLOAD_URL" -o awport-agent
+    curl -fSL "$DOWNLOAD_URL" -o "$TMP_BINARY"
 elif command -v wget &> /dev/null; then
-    wget -q "$DOWNLOAD_URL" -O awport-agent
+    wget -q "$DOWNLOAD_URL" -O "$TMP_BINARY"
 else
     echo -e "\033[31m[!] Neither curl nor wget found.\033[0m"
     exit 1
 fi
-chmod +x awport-agent
+
+if [ ! -s "$TMP_BINARY" ]; then
+    echo -e "\033[31m[!] Download failed.\033[0m"
+    rm -f "$TMP_BINARY"; exit 1
+fi
+chmod +x "$TMP_BINARY"
+
+# 2. Stop old agent AFTER download
+if [ -f "$PID_FILE" ]; then
+    OLD_PID=$(cat "$PID_FILE")
+    if kill -0 "$OLD_PID" 2>/dev/null; then
+        echo "[*] Stopping old agent (PID: $OLD_PID)..."
+        kill "$OLD_PID"
+        for i in $(seq 1 5); do kill -0 "$OLD_PID" 2>/dev/null || break; sleep 1; done
+        kill -0 "$OLD_PID" 2>/dev/null && kill -9 "$OLD_PID"
+        sleep 1
+    fi
+    rm -f "$PID_FILE"
+fi
+
+# 3. Replace binary (mv avoids "Text file busy")
+mv -f "$TMP_BINARY" "$BINARY"
+
 echo "Starting agent..."
-nohup ./awport-agent -master "$MASTER" -id "$ID" -token "$TOKEN" > agent.log 2>&1 &
-PID=$!
-echo -e "\033[32m[+] Agent started with PID $PID\033[0m"
+nohup "$BINARY" -master "$MASTER" -id "$ID" -token "$TOKEN" >> agent.log 2>&1 &
+echo $! > "$PID_FILE"
+echo -e "\033[32m[+] Agent started with PID $!\033[0m"
+echo "Log: $WORK_DIR/agent.log"
 `
 
-	defaultWindowsTpl = `# Anywhere-Port Installer for Windows (Internal Fallback)
-$ErrorActionPreference = "Stop"
+	defaultWindowsTpl = `$ErrorActionPreference = "Stop"
 $Master = "{{.MasterAddr}}"
 $ID = "{{.AgentID}}"
 $Token = "{{.Token}}"
 $DownloadUrl = "{{.DownloadUrl}}/awport-agent.exe"
 
 Write-Host "Anywhere-Port Agent Installer" -ForegroundColor Cyan
-Write-Host "-----------------------------"
 Write-Host "Master: $Master"
 Write-Host "ID:     $ID"
 
-$InstallDir = "anywhere-port"
-if (!(Test-Path $InstallDir)) {
-    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-}
+$InstallDir = "$env:USERPROFILE\anywhere-port"
+if (!(Test-Path $InstallDir)) { New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null }
 Set-Location $InstallDir
 
-Write-Host "Downloading agent from $DownloadUrl..." -ForegroundColor Yellow
-try {
-    Invoke-WebRequest -Uri $DownloadUrl -OutFile "awport-agent.exe" -UseBasicParsing
-} catch {
-    Write-Error "Failed to download agent: $_"
-    exit 1
-}
+$existing = Get-Process -Name "awport-agent" -ErrorAction SilentlyContinue
+if ($existing) { Stop-Process -Id $existing.Id -Force; Start-Sleep -Seconds 2 }
+
+try { Invoke-WebRequest -Uri $DownloadUrl -OutFile "awport-agent.exe" -UseBasicParsing }
+catch { Write-Error "Failed to download: $_"; exit 1 }
+
+if ((Get-Item "awport-agent.exe").Length -lt 1024) { Write-Error "Download failed."; exit 1 }
 
 $BatFile = "start_agent_$ID.bat"
-$CmdContent = "@echo off
-cd /d ""%%~dp0""
-start /b awport-agent.exe -master $Master -id $ID -token $Token"
-Set-Content -Path $BatFile -Value $CmdContent
+Set-Content -Path $BatFile -Value @"
+@echo off
+cd /d "%~dp0"
+tasklist /FI "IMAGENAME eq awport-agent.exe" 2>nul | find "awport-agent.exe" >nul && (echo Agent already running. & pause & exit /b 0)
+start /b awport-agent.exe -master $Master -id $ID -token $Token
+"@ -Encoding ASCII
 
-Write-Host "Setup complete. Run '$BatFile' to start." -ForegroundColor Green
+Start-Process -FilePath ".\awport-agent.exe" -ArgumentList "-master",$Master,"-id",$ID,"-token",$Token -WindowStyle Hidden
+Start-Sleep 1
+if (Get-Process -Name "awport-agent" -ErrorAction SilentlyContinue) { Write-Host "[+] Agent started." -ForegroundColor Green }
+else { Write-Host "[-] Failed to start." -ForegroundColor Red; exit 1 }
 `
 )
 

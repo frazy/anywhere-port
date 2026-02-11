@@ -30,16 +30,21 @@ func (l *Limiter) SetUsed(u int64) {
 	atomic.StoreInt64(&l.used, u)
 }
 
-// Allow 检查是否允许通过 n 字节的数据
+// Allow 检查是否允许通过 n 字节的数据（CAS 保证不会超额计量）
 func (l *Limiter) Allow(n int) bool {
 	if l.quota <= 0 {
 		return true
 	}
-	newUsed := atomic.AddInt64(&l.used, int64(n))
-	if newUsed > l.quota {
-		return false
+	for {
+		old := atomic.LoadInt64(&l.used)
+		newVal := old + int64(n)
+		if newVal > l.quota {
+			return false
+		}
+		if atomic.CompareAndSwapInt64(&l.used, old, newVal) {
+			return true
+		}
 	}
-	return true
 }
 
 // Wait 等待令牌桶许可

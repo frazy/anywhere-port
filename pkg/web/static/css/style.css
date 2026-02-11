@@ -1,14 +1,34 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+    --color-primary: #2563EB;
+    --color-primary-light: #3B82F6;
+    --color-cta: #F97316;
+    --color-bg: #F8FAFC;
+    --color-text: #1E293B;
+    --color-text-muted: #64748B;
+    --color-border: #E2E8F0;
+    --color-success: #22C55E;
+    --color-danger: #EF4444;
+    --color-card-bg: #FFFFFF;
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+}
+
 html,
 body {
     height: 100vh;
     margin: 0;
     overflow: hidden;
-    /* 核心：锁定全屏，禁止浏览器全局滚动 */
 }
 
 body {
-    background-color: #f8f9fa;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background-color: var(--color-bg);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: var(--color-text);
 }
 
 .container {
@@ -21,10 +41,10 @@ body {
 }
 
 .card {
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-    border: none;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
     margin-bottom: 0.75rem;
-    /* 压缩全局卡片间距 */
 }
 
 .card-header {
@@ -57,8 +77,8 @@ body {
 }
 
 .clickable-node:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
+    border-color: var(--color-primary-light) !important;
 }
 
 .clickable-node.active {
@@ -161,10 +181,19 @@ th.text-end {
     font-size: 0.875rem;
 }
 
-/* Error Toast */
+/* Toast Notifications */
 #error-toast,
 #success-toast {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+#error-toast.show,
+#success-toast.show {
+    opacity: 1;
+    transform: translateY(0);
 }
 
 /* Rules Table Scrolling - 核心重构 */
@@ -227,8 +256,8 @@ th.text-end {
 }
 
 .clickable-node:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+    border-color: var(--color-primary-light) !important;
 }
 
 .node-status-badge {
@@ -428,6 +457,11 @@ th.text-end {
 }
 
 /* Custom Scrollbar */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: #dee2e6 transparent;
+}
+
 ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -444,6 +478,15 @@ th.text-end {
 
 ::-webkit-scrollbar-thumb:hover {
     background: #ced4da;
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+    .fade-in { animation: none; }
+    .clickable-node { transition: none; }
+    .sidebar-nav { transition: none; }
+    .btn-icon { transition: none; }
+    #error-toast, #success-toast { transition: none; }
 }
 /* -------------------------------------------------------- */
 /* Mobile Specific Styles (Max-width 768px)                 */
@@ -464,19 +507,19 @@ th.text-end {
     }
 
     /* 顶部标题和按钮组布局调整 */
-    .d-flex.justify-content-between.align-items-center.mb-3 {
-        flex-direction: column; /* 垂直堆叠 */
-        align-items: flex-start !important; /* 左对齐 */
-        gap: 10px; /* 增加间距 */
+    .page-header {
+        flex-direction: column;
+        align-items: flex-start !important;
+        gap: 10px;
     }
-    .d-flex.justify-content-between.align-items-center.mb-3 .d-flex.gap-2 {
-        flex-wrap: wrap; /* 按钮组允许换行 */
-        width: 100%; /* 占据父容器宽度 */
-        justify-content: flex-start; /* 按钮左对齐 */
+    .page-header .header-actions {
+        flex-wrap: wrap;
+        width: 100%;
+        justify-content: flex-start;
     }
-    .d-flex.justify-content-between.align-items-center.mb-3 .d-flex.gap-2 button {
-        flex-grow: 1; /* 按钮自适应宽度 */
-        min-width: unset; /* 取消最小宽度限制 */
+    .page-header .header-actions button {
+        flex-grow: 1;
+        min-width: unset;
     }
 
     /* 节点列表样式优化 */
@@ -522,24 +565,24 @@ th.text-end {
     }
 
     /* 连接命令区域优化 */
-    .d-flex.align-items-center.gap-2.bg-light.rounded.px-2.py-1.border {
-        flex-wrap: nowrap; /* 防止内部元素换行 */
-        justify-content: flex-start; /* 左对齐 */
+    .connect-cmd-bar {
+        flex-wrap: nowrap;
+        justify-content: flex-start;
         width: 100%;
         max-width: none;
         margin-top: 10px;
-        padding-left: 5px !important; /* 调整内边距 */
+        padding-left: 5px !important;
         padding-right: 5px !important;
     }
-    .d-flex.align-items-center.gap-2.bg-light.rounded.px-2.py-1.border .small.text-muted.text-nowrap {
-        flex-shrink: 0; /* 防止文本被压缩 */
+    .connect-cmd-bar .cmd-label {
+        flex-shrink: 0;
     }
     #node-connect-cmd {
-        flex-grow: 1; /* 输入框自适应宽度 */
-        max-width: unset; /* 取消最大宽度限制 */
-        min-width: 80px; /* 确保最小宽度 */
-        font-size: 0.65rem; /* 调整字体大小 */
-        padding-left: 0 !important; /* 调整内边距 */
+        flex-grow: 1;
+        max-width: unset;
+        min-width: 80px;
+        font-size: 0.65rem;
+        padding-left: 0 !important;
         padding-right: 0 !important;
     }
     .btn-icon {

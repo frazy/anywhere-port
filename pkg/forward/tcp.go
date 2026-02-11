@@ -5,10 +5,19 @@ import (
 	"io"
 	"log"
 	"net"
+	"sync"
 	"time"
 
 	"anywhere-port/pkg/limit"
 )
+
+// 默认连接超时，可在 RuleConfig 中覆盖
+const defaultDialTimeout = 10 * time.Second
+
+// TCP 转发用的 buffer 池，减少高并发时的 GC 压力
+var tcpBufPool = sync.Pool{
+	New: func() interface{} { return make([]byte, 64*1024) },
+}
 
 func (e *Engine) startTCP(ctx context.Context, rule *Rule) error {
 	l, err := net.Listen("tcp", rule.Config.ListenAddr)
@@ -57,7 +66,12 @@ func (e *Engine) handleTCP(ctx context.Context, src net.Conn, rule *Rule) {
 		return
 	}
 
-	dst, err := net.DialTimeout("tcp", rule.Config.RemoteAddr, 5*time.Second)
+	timeout := defaultDialTimeout
+	if rule.Config.DialTimeout > 0 {
+		timeout = time.Duration(rule.Config.DialTimeout) * time.Second
+	}
+
+	dst, err := net.DialTimeout("tcp", rule.Config.RemoteAddr, timeout)
 	if err != nil {
 		log.Printf("Dial error to %s: %v", rule.Config.RemoteAddr, err)
 		return
@@ -77,17 +91,21 @@ func (e *Engine) handleTCP(ctx context.Context, src net.Conn, rule *Rule) {
 			errChan <- nil
 		}()
 	} else {
-		// Wrap connections with limiter
+		// Wrap connections with limiter, use pooled buffers
 		srcLimited := &RateLimitedConn{Conn: src, Limiter: rule.Limiter, Ctx: ctx}
 		dstLimited := &RateLimitedConn{Conn: dst, Limiter: rule.Limiter, Ctx: ctx}
 
 		go func() {
-			_, err := io.Copy(dst, srcLimited) // Upload
+			buf := tcpBufPool.Get().([]byte)
+			defer tcpBufPool.Put(buf)
+			_, err := io.CopyBuffer(dst, srcLimited, buf) // Upload
 			errChan <- err
 		}()
 
 		go func() {
-			_, err := io.Copy(src, dstLimited) // Download
+			buf := tcpBufPool.Get().([]byte)
+			defer tcpBufPool.Put(buf)
+			_, err := io.CopyBuffer(src, dstLimited, buf) // Download
 			errChan <- err
 		}()
 	}
@@ -106,16 +124,6 @@ type RateLimitedConn struct {
 }
 
 func (c *RateLimitedConn) Read(b []byte) (n int, err error) {
-	// Check quota first
-	if !c.Limiter.Allow(1) { // Check if we have *any* quota left
-		return 0, io.EOF
-	}
-
-	// Read first, then wait? Or Wait then Read?
-	// If we read first, we "spent" the bandwidth already on the wire.
-	// But we can't control the wire receive unless we stop reading.
-	// So we Read (pull from kernel buffer), then Wait (delay app processing), simulating slow link.
-
 	n, err = c.Conn.Read(b)
 	if n > 0 {
 		if !c.Limiter.Allow(n) {

@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 
 <head>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Anywhere-Port Manager</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -15,13 +16,13 @@
     <!-- 主容器 -->
     <div class="container py-3">
         <!-- Header -->
-        <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="d-flex justify-content-between align-items-center mb-3 page-header">
             <div class="d-flex align-items-center gap-3">
                 <h3 class="mb-0 text-primary fw-bold">Anywhere-Port</h3>
                 <span class="badge bg-primary rounded-pill">V2.0</span>
                 <small class="text-muted ms-2" id="node-count" style="font-size:0.8rem"></small>
             </div>
-            <div class="d-flex gap-2">
+            <div class="d-flex gap-2 header-actions">
                 <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
                     onclick="triggerBackup()" title="立即将全量配置备份到所有在线冗余节点">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor"
@@ -50,9 +51,15 @@
             class="flex-column align-items-center justify-content-center py-5 text-center fade-in">
             <div class="mb-4 opacity-50">
                 <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" fill="#dee2e6" viewBox="0 0 16 16">
-                    <path d="M11 6a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
-                    <path fill-rule="evenodd"
-                        d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm8-7a7 7 0 0 0-5.468 11.37C3.242 11.226 4.805 10 8 10s4.757 1.225 5.468 2.37A7 7 0 0 0 8 1z" />
+                    <path
+                        d="M1.333 2.75C1.333 1.784 2.117 1 3.083 1h9.834c.966 0 1.75.784 1.75 1.75v4.5c0 .966-.784 1.75-1.75 1.75H3.083c-.966 0-1.75-.784-1.75-1.75v-4.5zM3.083 2a.75.75 0 0 0-.75.75v4.5c0 .414.336.75.75.75h9.834a.75.75 0 0 0 .75-.75v-4.5a.75.75 0 0 0-.75-.75H3.083z" />
+                    <path
+                        d="M3.5 5.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0zm2 0a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0zM8.5 5a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1h-3zM8 3.5a.5.5 0 0 0 .5.5h3a.5.5 0 0 0 0-1h-3a.5.5 0 0 0-.5.5z" />
+                    <path d="M7.5 10h1V9h-1v1zm0 1v3.5a.5.5 0 0 0 1 0V11h-1z" />
+                    <path
+                        d="M1.333 10.75c0-.966.784-1.75 1.75-1.75h9.834c.966 0 1.75.784 1.75 1.75v4.5c0 .966-.784 1.75-1.75 1.75H3.083c-.966 0-1.75-.784-1.75-1.75v-4.5zM3.083 10a.75.75 0 0 0-.75.75v4.5c0 .414.336.75.75.75h9.834a.75.75 0 0 0 .75-.75v-4.5a.75.75 0 0 0-.75-.75H3.083z" />
+                    <path
+                        d="M3.5 13.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0zm2 0a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0zM8.5 13a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1h-3zm0-2a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1h-3z" />
                 </svg>
             </div>
             <h5 class="text-secondary mb-2">请先选择一个节点进行管理</h5>
@@ -73,8 +80,9 @@
                         </svg>
                     </button>
                 </div>
-                <div class="d-flex align-items-center gap-2 bg-light rounded px-2 py-1 border" style="max-width: 85%;">
-                    <span class="small text-muted text-nowrap">连接命令:</span>
+                <div class="d-flex align-items-center gap-2 bg-light rounded px-2 py-1 border connect-cmd-bar"
+                    style="max-width: 85%;">
+                    <span class="small text-muted text-nowrap cmd-label">连接命令:</span>
                     <input type="text" id="node-connect-cmd"
                         class="form-control form-control-sm border-0 bg-transparent font-monospace py-0 shadow-none"
                         readonly style="font-size: 0.75rem;">

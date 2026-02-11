@@ -7,6 +7,14 @@ let currentState = {
     sidebarAutoTriggered: false
 };
 
+// HTML 转义，防止 XSS
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
 // Bootstrap Modals
 let editModal, deleteModal, registerModal, confirmModal, nodeEditModal;
 
@@ -113,14 +121,14 @@ function renderNodes() {
     currentState.nodes.forEach((node, absoluteIndex) => {
         const isActive = node.id === currentState.selectedNodeId ? 'active' : '';
         const statusColor = node.status === 'online' ? 'text-success' : 'text-danger';
-        const alias = node.hostname ? `(${node.hostname})` : '';
+        const alias = node.hostname ? `(${escapeHtml(node.hostname)})` : '';
         const backupBadge = node.is_backup ? `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" class="text-info" viewBox="0 0 16 16" title="冗余备份节点" style="transform: translateY(1px);"><path fill-rule="evenodd" d="M7.646 5.146a.5.5 0 0 1 .708 0l2 2a.5.5 0 0 1-.708.708L8.5 6.707V10.5a.5.5 0 0 1-1 0V6.707L6.354 7.854a.5.5 0 1 1-.708-.708z"/><path d="M4.406 3.342A5.53 5.53 0 0 1 8 2c2.69 0 4.923 2 5.166 4.579.066.646-.083 1.258-.405 1.763l-.01.015a.5.5 0 0 1-.849-.526L11.9 7.82c.204-.32.302-.712.261-1.125C11.967 4.53 10.19 3 8 3c-2.015 0-3.693 1.258-4.28 3h.526a.5.5 0 0 1 0 1H2.5a.5.5 0 0 1-.5-.5V4.5a.5.5 0 0 1 1 0v.581c.642-1.74 2.37-3.239 4.406-3.739z"/></svg> ` : '';
 
         sidebarList.innerHTML += `
             <div class="sidebar-item ${isActive}" onclick="handleNodeSelection('${node.id}', ${absoluteIndex})">
                 <div class="d-flex justify-content-between align-items-center">
                     <div class="text-truncate" style="max-width: 220px;">
-                        <strong>${node.id}</strong> <small class="text-muted">${alias}</small>
+                        <strong>${escapeHtml(node.id)}</strong> <small class="text-muted">${alias}</small>
                     </div>
                     <div class="d-flex align-items-center gap-1">
                         ${backupBadge}
@@ -143,7 +151,7 @@ function renderNodes() {
     displayNodes.forEach(node => {
         const isActive = node.id === currentState.selectedNodeId ? 'active' : '';
         const statusColor = node.status === 'online' ? 'text-success' : 'text-danger';
-        const alias = node.hostname ? `(${node.hostname})` : '';
+        const alias = node.hostname ? `(${escapeHtml(node.hostname)})` : '';
 
         const memInfo = node.mem_total ? `${(node.mem_used / 1024).toFixed(1)} / ${(node.mem_total / 1024).toFixed(1)} GB` : '---';
         const diskUsagePercent = node.disk_total ? Math.round((node.disk_used / node.disk_total) * 100) : 0;
@@ -186,7 +194,7 @@ function renderNodes() {
                 <div class="node-card-header mb-1">
                     <div class="node-title-group">
                         <div class="fw-bold text-truncate-auto">
-                            ${node.id} <span class="text-muted fw-normal small">${alias}</span>
+                            ${escapeHtml(node.id)} <span class="text-muted fw-normal small">${alias}</span>
                         </div>
                     </div>
                     <div class="d-flex align-items-center gap-1">
@@ -263,10 +271,16 @@ window.updateCommandDisplay = function () {
 }
 
 window.copySelectCommand = function () {
-    const el = document.getElementById('node-connect-cmd');
-    el.select();
-    document.execCommand('copy');
-    showToast('命令已复制到剪贴板', 'success');
+    const text = document.getElementById('node-connect-cmd').value;
+    navigator.clipboard.writeText(text).then(() => {
+        showToast('命令已复制到剪贴板', 'success');
+    }).catch(() => {
+        // Fallback for older browsers
+        const el = document.getElementById('node-connect-cmd');
+        el.select();
+        document.execCommand('copy');
+        showToast('命令已复制到剪贴板', 'success');
+    });
 }
 
 window.openNodeEdit = function () {
@@ -366,7 +380,7 @@ function renderRules() {
             const quotaDisplay = r.total_quota > 0 ? formatBytes(r.total_quota) : '∞';
             const used = formatBytes(r.used_traffic || 0);
             const badgeClass = r.protocol === 'tcp' ? 'badge-tcp' : 'badge-udp';
-            const commentSafe = (r.comment || '').replace(/'/g, "\\'");
+            const commentSafe = escapeHtml(r.comment || '').replace(/'/g, "\\'");
 
             return `
                 <tr>
@@ -383,7 +397,7 @@ function renderRules() {
                             ${used} / ${quotaDisplay}
                         </span>
                     </td>
-                    <td>${r.comment || ''}</td>
+                    <td>${escapeHtml(r.comment || '')}</td>
                     <td class="text-center">
                         <button class="btn btn-sm btn-outline-danger" onclick="openDelete('${r.id}')">删除</button>
                     </td>
@@ -509,10 +523,15 @@ async function handleRegisterSubmit(e) {
 }
 
 window.copyCommand = function () {
-    const el = document.getElementById('reg-command');
-    el.select();
-    document.execCommand('copy');
-    showToast('命令已复制到剪贴板', 'success');
+    const text = document.getElementById('reg-command').value;
+    navigator.clipboard.writeText(text).then(() => {
+        showToast('命令已复制到剪贴板', 'success');
+    }).catch(() => {
+        const el = document.getElementById('reg-command');
+        el.select();
+        document.execCommand('copy');
+        showToast('命令已复制到剪贴板', 'success');
+    });
 }
 
 // Utilities
@@ -533,8 +552,12 @@ function showToast(msg, type = 'success') {
     document.getElementById(msgId).textContent = msg;
 
     el.style.display = 'block';
+    requestAnimationFrame(() => {
+        el.classList.add('show');
+    });
     setTimeout(() => {
-        el.style.display = 'none';
+        el.classList.remove('show');
+        setTimeout(() => { el.style.display = 'none'; }, 300);
     }, 3000);
 }
 

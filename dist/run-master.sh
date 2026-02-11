@@ -1,34 +1,39 @@
 #!/bin/bash
+set -e
 
 APP_NAME="awport-master"
 NEW_BINARY="awport-master_linux_amd64"
 LOG_FILE="master.log"
+PID_FILE="${APP_NAME}.pid"
 
 echo "=== Anywhere-Port Deploy Script ==="
 
-# 1. Stop existing process
-# Filter by name, exclude current script (if name matches), exclude grep
-PID=$(ps -ef | grep "$APP_NAME" | grep -v "$NEW_BINARY" | grep -v "grep" | grep -v "run.sh" | awk '{print $2}')
+# 1. Stop existing process (via PID file)
+if [ -f "$PID_FILE" ]; then
+    OLD_PID=$(cat "$PID_FILE")
+    if kill -0 "$OLD_PID" 2>/dev/null; then
+        echo "[*] Stopping existing $APP_NAME (PID: $OLD_PID)..."
+        kill "$OLD_PID"
 
-if [ -n "$PID" ]; then
-    echo "[*] Stopping existing $APP_NAME (PID: $PID)..."
-    kill $PID
-    
-    # Wait loop
-    for i in {1..10}; do
-        if ! ps -p $PID > /dev/null; then
-            break
+        # Wait loop
+        for i in $(seq 1 10); do
+            if ! kill -0 "$OLD_PID" 2>/dev/null; then
+                break
+            fi
+            echo "    Waiting for shutdown... ($i/10)"
+            sleep 1
+        done
+
+        # Force kill if necessary
+        if kill -0 "$OLD_PID" 2>/dev/null; then
+            echo "[!] Process hung, force killing..."
+            kill -9 "$OLD_PID"
         fi
-        echo "    Waiting for shutdown..."
-        sleep 1
-    done
-
-    # Force kill if necessary
-    if ps -p $PID > /dev/null; then
-        echo "[!] Process hung, force killing..."
-        kill -9 $PID
+        echo "[+] Process stopped."
+    else
+        echo "[*] Stale PID file found, cleaning up."
     fi
-    echo "[+] Process stopped."
+    rm -f "$PID_FILE"
 else
     echo "[*] $APP_NAME is not running."
 fi
@@ -36,12 +41,12 @@ fi
 # 2. Update binary
 if [ -f "$NEW_BINARY" ]; then
     echo "[*] Found new binary: $NEW_BINARY"
-    
+
     # Backup old if exists
     if [ -f "$APP_NAME" ]; then
         mv "$APP_NAME" "${APP_NAME}.bak"
     fi
-    
+
     mv "$NEW_BINARY" "$APP_NAME"
     chmod +x "$APP_NAME"
     echo "[+] Binary updated."
@@ -54,7 +59,18 @@ fi
 
 # 3. Start
 echo "[*] Starting $APP_NAME..."
-nohup ./$APP_NAME > "$LOG_FILE" 2>&1 &
+echo "=== $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG_FILE"
+nohup ./$APP_NAME >> "$LOG_FILE" 2>&1 &
 NEW_PID=$!
-echo "[+] Started with PID: $NEW_PID"
-echo "    Log file: $LOG_FILE"
+echo "$NEW_PID" > "$PID_FILE"
+
+# 4. Verify startup
+sleep 1
+if kill -0 "$NEW_PID" 2>/dev/null; then
+    echo "[+] Started successfully (PID: $NEW_PID)"
+    echo "    Log file: $LOG_FILE"
+else
+    echo "[-] Error: Process exited immediately! Check $LOG_FILE for details."
+    rm -f "$PID_FILE"
+    exit 1
+fi

@@ -24,6 +24,7 @@ type RuleConfig struct {
 	SpeedLimit  int64  `json:"speed_limit"`  // Bytes/s
 	TotalQuota  int64  `json:"total_quota"`  // Total Bytes
 	UsedTraffic int64  `json:"used_traffic"` // Initial used traffic (synced from Master)
+	DialTimeout int    `json:"dial_timeout"` // TCP 连接超时（秒），0 使用默认值
 	Comment     string `json:"comment"`      // Remark
 }
 
@@ -300,24 +301,14 @@ func (e *Engine) LoadData() error {
 }
 
 func (e *Engine) SaveRules() error {
-	e.mu.RLock() // Read Lock for iterating rules
+	e.mu.RLock()
 	configs := make([]RuleConfig, 0, len(e.rules))
 	for _, r := range e.rules {
 		configs = append(configs, r.Config)
 	}
 	e.mu.RUnlock()
 
-	// Write to temp file then rename? For simplicity direct write.
-	file, err := os.Create(e.RulesPath)
-	if err != nil {
-		log.Printf("Failed to save rules: %v", err)
-		return err
-	}
-	defer file.Close()
-
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(configs)
+	return atomicWriteJSON(e.RulesPath, configs)
 }
 
 func (e *Engine) SaveStats() error {
@@ -332,16 +323,33 @@ func (e *Engine) SaveStats() error {
 	}
 	e.mu.RUnlock()
 
-	file, err := os.Create(e.StatsPath)
+	return atomicWriteJSON(e.StatsPath, stats)
+}
+
+// atomicWriteJSON 先写临时文件再 rename，防止崩溃时损坏数据
+func atomicWriteJSON(path string, v interface{}) error {
+	tmpPath := path + ".tmp"
+	file, err := os.Create(tmpPath)
 	if err != nil {
-		log.Printf("Failed to save stats: %v", err)
+		log.Printf("Failed to create temp file %s: %v", tmpPath, err)
 		return err
 	}
-	defer file.Close()
 
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")
-	return encoder.Encode(stats)
+	if err := encoder.Encode(v); err != nil {
+		file.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	file.Close()
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		log.Printf("Failed to rename %s -> %s: %v", tmpPath, path, err)
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 // ResetTraffic resets the used traffic for a rule
