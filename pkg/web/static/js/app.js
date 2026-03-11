@@ -84,6 +84,12 @@ async function loadRules() {
 }
 
 function renderUI() {
+    // 交互防抖：如果用户正把鼠标悬停在可能有展开提示（title或截断层）的元素上，跳过本次重绘以防闪烁
+    const hovered = document.querySelector(':hover');
+    if (hovered && (hovered.hasAttribute('title') || hovered.closest('[title]') || hovered.classList.contains('text-truncate'))) {
+        return; 
+    }
+
     renderNodes();
     renderRules();
 }
@@ -156,12 +162,13 @@ function renderNodes() {
         const memInfo = node.mem_total ? `${(node.mem_used / 1024).toFixed(1)} / ${(node.mem_total / 1024).toFixed(1)} GB` : '---';
         const diskUsagePercent = node.disk_total ? Math.round((node.disk_used / node.disk_total) * 100) : 0;
         const uptimeStr = node.uptime ? formatUptime(node.uptime) : '---';
+        const coresBadge = node.cpu_cores ? ` x${node.cpu_cores}` : '';
 
         const statsHtml = node.status === 'online' ? `
             <div class="row g-2 mt-2">
                 <div class="col-6">
                     <div class="d-flex justify-content-between small text-muted mb-1" style="font-size: 0.75rem;">
-                        <span>CPU</span>
+                        <span>CPU${coresBadge}</span>
                         <span>${node.cpu_usage.toFixed(1)}%</span>
                     </div>
                     <div class="progress" style="height: 4px; background-color: rgba(0,0,0,0.05);">
@@ -171,7 +178,7 @@ function renderNodes() {
                 <div class="col-6">
                     <div class="d-flex justify-content-between small text-muted mb-1" style="font-size: 0.75rem;">
                          <span>MEM</span>
-                         <span>${((node.mem_used || 0) / 1024).toFixed(1)}G</span>
+                         <span>${((node.mem_used || 0) / 1024).toFixed(1)}/${((node.mem_total || 0) / 1024).toFixed(0)}G</span>
                     </div>
                     <div class="progress" style="height: 4px; background-color: rgba(0,0,0,0.05);">
                         <div class="progress-bar bg-info" style="width: ${Math.round((node.mem_used / node.mem_total) * 100)}%"></div>
@@ -179,7 +186,7 @@ function renderNodes() {
                 </div>
             </div>
                 <div class="node-meta-grid mt-2 pt-2 border-top border-light">
-                    <div class="meta-item"><span class="meta-label">CPU:</span>${node.cpu_model || 'Unknown'}</div>
+                    <div class="meta-item"><span class="meta-label">CPU:</span>${node.cpu_model || 'Unknown'}${coresBadge}</div>
                     <div class="meta-item"><span class="meta-label">OS:</span>${node.os_version || 'Unknown'}</div>
                     <div class="meta-item"><span class="meta-label">DISK:</span>${diskUsagePercent}% (${(node.disk_used / 1024).toFixed(0)}G / ${(node.disk_total / 1024).toFixed(0)}G)
                         <div class="disk-progress"><div class="disk-bar" style="width: ${diskUsagePercent}%"></div></div>
@@ -200,6 +207,7 @@ function renderNodes() {
                     <div class="d-flex align-items-center gap-1">
                         ${node.is_backup ? `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="text-info" viewBox="0 0 16 16" title="冗余备份节点" style="transform: translateY(1.5px);"><path fill-rule="evenodd" d="M7.646 5.146a.5.5 0 0 1 .708 0l2 2a.5.5 0 0 1-.708.708L8.5 6.707V10.5a.5.5 0 0 1-1 0V6.707L6.354 7.854a.5.5 0 1 1-.708-.708z"/><path d="M4.406 3.342A5.53 5.53 0 0 1 8 2c2.69 0 4.923 2 5.166 4.579.066.646-.083 1.258-.405 1.763l-.01.015a.5.5 0 0 1-.849-.526L11.9 7.82c.204-.32.302-.712.261-1.125C11.967 4.53 10.19 3 8 3c-2.015 0-3.693 1.258-4.28 3h.526a.5.5 0 0 1 0 1H2.5a.5.5 0 0 1-.5-.5V4.5a.5.5 0 0 1 1 0v.581c.642-1.74 2.37-3.239 4.406-3.739z"/></svg>` : ''}
                         <div class="node-status-badge ${statusColor} small" style="font-size: 0.7rem;">● ${node.status.toUpperCase()}</div>
+                        <button class="btn btn-sm text-danger ms-1 p-0" onclick="event.stopPropagation(); deleteNode('${node.id}')" title="彻底删除此节点" style="line-height: 1;">×</button>
                     </div>
                 </div>
                 <div class="text-muted small d-flex justify-content-between align-items-center mb-1" style="font-size: 0.75rem; opacity: 0.8;">
@@ -356,6 +364,32 @@ window.resetNodeToken = async function () {
     }
 }
 
+window.deleteNode = async function (id) {
+    if (!id) return;
+    
+    const ok = await showConfirm(
+        `<strong class="text-danger">危险操作警告！</strong><br>您确定要彻底删除节点 <code>${id}</code> 吗？<br><br><span class="text-muted small">彻底删除将一同粉碎挂载在该节点下的<strong class="text-danger">所有端口规则与流量数据</strong>，无法还原！</span>`,
+        '彻底删除节点'
+    );
+    if (!ok) return;
+
+    try {
+        const resp = await fetch(`/api/cluster/nodes/${id}`, {
+            method: 'DELETE'
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+
+        if (currentState.selectedNodeId === id) {
+            currentState.selectedNodeId = null;
+            window.location.hash = '';
+        }
+        showToast(`节点 ${id} 已被彻底移除`, 'success');
+        fetchData();
+    } catch (err) {
+        showError('删除节点失败: ' + err.message);
+    }
+}
+
 function renderRules() {
     if (!currentState.selectedNodeId) {
         document.getElementById('management-area').style.display = 'none';
@@ -381,12 +415,26 @@ function renderRules() {
             const used = formatBytes(r.used_traffic || 0);
             const badgeClass = r.protocol === 'tcp' ? 'badge-tcp' : 'badge-udp';
             const commentSafe = escapeHtml(r.comment || '').replace(/'/g, "\\'");
+            
+            let statusIndicator = `<span class="badge ${badgeClass}">${r.protocol.toUpperCase()}</span>`;
+            let trClass = "";
+            let actionBtnHtml = `<button class="btn btn-sm btn-outline-danger" onclick="openDelete('${r.id}')">删除</button>`;
+            
+            if (r.error && r.error !== "") {
+                trClass = "table-danger opacity-75";
+                const errSafe = escapeHtml(r.error).replace(/'/g, "\\'").replace(/"/g, "&quot;");
+                statusIndicator = `<span class="badge bg-danger" title="${errSafe}" style="cursor:help;">ERROR ⚠️</span>`;
+                actionBtnHtml = `
+                    <button class="btn btn-sm btn-outline-warning me-1" onclick="retryRule('${r.id}')" title="重试">↻</button>
+                    ${actionBtnHtml}
+                `;
+            }
 
             return `
-                <tr>
+                <tr class="${trClass}">
                     <td class="table-mono">${r.listen_addr}</td>
                     <td class="table-mono text-truncate" style="max-width: 0;" title="${r.remote_addr}">${r.remote_addr}</td>
-                    <td><span class="badge ${badgeClass}">${r.protocol.toUpperCase()}</span></td>
+                    <td>${statusIndicator}</td>
                     <td class="text-end table-mono">
                          <span class="clickable-edit" onclick="openEdit('${r.id}', ${r.speed_limit || 0}, ${r.total_quota || 0}, '${commentSafe}')">
                             ${speedDisplay}
@@ -398,8 +446,8 @@ function renderRules() {
                         </span>
                     </td>
                     <td>${escapeHtml(r.comment || '')}</td>
-                    <td class="text-center">
-                        <button class="btn btn-sm btn-outline-danger" onclick="openDelete('${r.id}')">删除</button>
+                    <td class="text-center text-nowrap">
+                        ${actionBtnHtml}
                     </td>
                 </tr>
             `;
@@ -568,8 +616,8 @@ function showError(msg) {
 
 function showConfirm(msg, title = '确认操作') {
     return new Promise((resolve) => {
-        document.getElementById('confirm-title').textContent = title;
-        document.getElementById('confirm-msg').textContent = msg;
+        document.getElementById('confirm-title').innerHTML = title;
+        document.getElementById('confirm-msg').innerHTML = msg;
         const okBtn = document.getElementById('confirm-ok-btn');
 
         const onConfirm = () => {
@@ -641,6 +689,20 @@ window.saveEdit = async function () {
 window.openDelete = function (id) {
     document.getElementById('delete-id').value = id;
     deleteModal.show();
+}
+
+window.retryRule = async function (id) {
+    try {
+        const res = await fetch(`${API_URL}/${id}/retry`, { method: 'POST' });
+        if (res.ok) {
+            showToast('已下发重试指令，请等待数秒后查看结果', 'success');
+            setTimeout(fetchData, 1000);
+        } else {
+            showError('Retry failed: ' + await res.text());
+        }
+    } catch (err) {
+        showError('Network error');
+    }
 }
 
 window.confirmDelete = async function () {

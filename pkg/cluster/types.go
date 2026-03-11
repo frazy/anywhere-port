@@ -39,6 +39,7 @@ type NodeStats struct {
 	// 静态指标 (连接时确定)
 	OSVersion string `json:"os_version"`
 	CPUModel  string `json:"cpu_model"`
+	CPUCores  int    `json:"cpu_cores"`  // [NEW] CPU 核数
 	MemTotal  uint64 `json:"mem_total"`  // MB
 	DiskTotal uint64 `json:"disk_total"` // MB
 
@@ -78,11 +79,13 @@ type ForwardRule struct {
 	TotalQuota  int64  `json:"total_quota"`  // Bytes
 	UsedTraffic int64  `json:"used_traffic"` // 已使用流量 (bytes)
 	Comment     string `json:"comment"`
+	Error       string `json:"error,omitempty"` // [NEW] Master 持有的实时故障原因
 }
 
 // SyncRulesPayload 规则下发载荷
 type SyncRulesPayload struct {
-	Rules []ForwardRule `json:"rules"`
+	Rules     []ForwardRule `json:"rules"`
+	EnableUFW bool          `json:"enable_ufw"`
 }
 
 // StatsReportPayload 流量统计上报载荷
@@ -91,8 +94,9 @@ type StatsReportPayload struct {
 }
 
 type RuleStats struct {
-	UpBytes   int64 `json:"up"`
-	DownBytes int64 `json:"down"`
+	UpBytes   int64  `json:"up"`
+	DownBytes int64  `json:"down"`
+	Error     string `json:"error,omitempty"` // [NEW] 记录规则执行的异常
 }
 
 // AuthPayload 认证载荷 (Agent -> Master, 包含静态数据)
@@ -104,6 +108,7 @@ type AuthPayload struct {
 	Version   string `json:"version"`
 	OS        string `json:"os"`
 	CPUModel  string `json:"cpu_model"`
+	CPUCores  int    `json:"cpu_cores"`
 	MemTotal  uint64 `json:"mem_total"`
 	DiskTotal uint64 `json:"disk_total"`
 }

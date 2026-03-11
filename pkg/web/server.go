@@ -162,6 +162,7 @@ func (s *Server) ListenAndServe(addr string) error {
 
 	// Cluster API
 	mux.HandleFunc("/api/cluster/nodes", s.handleNodes)
+	mux.HandleFunc("/api/cluster/nodes/", s.handleNodeAction) // DELETE
 	mux.HandleFunc("/api/cluster/nodes/reset", s.handleResetNodeToken)
 	mux.HandleFunc("/api/cluster/nodes/update", s.handleUpdateNode)      // New: Update node comment
 	mux.HandleFunc("/api/cluster/backup", s.handleBackup)                // New: Manual backup trigger
@@ -307,11 +308,25 @@ func (s *Server) handleRuleAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 流量重置功能在 Master 层面需要转发指令给 Agent，此处暂留空或仅支持状态重置
-	if r.Method == http.MethodPost && strings.HasSuffix(id, "/reset") {
-		// realID := strings.TrimSuffix(id, "/reset")
-		// TODO: 向对应 Agent 发送重置指令
-		w.WriteHeader(http.StatusOK)
+	// 重试 /api/rules/{id}/retry
+	if r.Method == http.MethodPost && strings.HasSuffix(id, "/retry") {
+		realID := strings.TrimSuffix(id, "/retry")
+		
+		var targetNodeID string
+		rules := s.hub.GetAllRules()
+		for _, r := range rules {
+			if r.ID == realID {
+				targetNodeID = r.NodeID
+				break
+			}
+		}
+		
+		if targetNodeID != "" {
+			s.hub.SyncRulesToAgent(targetNodeID)
+			w.WriteHeader(http.StatusOK)
+		} else {
+			http.Error(w, "Rule not found", http.StatusNotFound)
+		}
 		return
 	}
 
@@ -409,6 +424,27 @@ func (s *Server) handleResetNodeToken(w http.ResponseWriter, r *http.Request) {
 		"id":    req.ID,
 		"token": token,
 	})
+}
+
+func (s *Server) handleNodeAction(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 5 {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	id := parts[4]
+
+	switch r.Method {
+	case http.MethodDelete:
+		if err := s.hub.DeleteNode(id); err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
@@ -527,20 +563,24 @@ func (s *Server) handleConnectScript(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[DEBUG WS] Incoming WS connection from %s", r.RemoteAddr)
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("WS upgrade failed: %v", err)
+		log.Printf("[DEBUG WS] WS upgrade failed from %s: %v", r.RemoteAddr, err)
 		return
 	}
+	log.Printf("[DEBUG WS] WS upgrade SUCCESS for %s", r.RemoteAddr)
 
 	// 1. 等待 Auth 消息
 	var msg cluster.Message
 	if err := conn.ReadJSON(&msg); err != nil {
+		log.Printf("[DEBUG WS] ReadJSON Auth failed for %s: %v", r.RemoteAddr, err)
 		conn.Close()
 		return
 	}
 
 	if msg.Type != cluster.MsgAuth {
+		log.Printf("[DEBUG WS] Unexpected first message type '%s' from %s", msg.Type, r.RemoteAddr)
 		conn.Close()
 		return
 	}
@@ -562,13 +602,29 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		clientIP = clientIP[:idx] // Remove port if present
 	}
 
-	_ = s.hub.Register(conn, clientIP, authPayload)
-	defer s.hub.Unregister(authPayload.ID)
+	agent := s.hub.Register(conn, clientIP, authPayload)
+	if agent == nil {
+		return // 注册失败或冲突 (错误已被 Hub 发送)
+	}
+	defer s.hub.Unregister(authPayload.ID, conn)
 
 	// 注册后立即推送该节点的生存规则
 	s.hub.SyncRulesToAgent(authPayload.ID)
 
+	// 3. 配置读超时和死连接清理
+	const pongWait = 35 * time.Second
+	conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPingHandler(func(appData string) error {
+		conn.SetReadDeadline(time.Now().Add(pongWait))
+		// 必须使用原生的 WriteControl，因为该回调发生在 Read 循环中，直接使用 WriteMessage 会与外层 Send(msg) 抢占抛出 Panic
+		return conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(10*time.Second))
+	})
+
+	// 4. 持续监听消息
 	for {
+		// 每次成功进入或读取前后，保障基础的超时窗口 (防止只发了业务请求比如心跳，而没触发底层 Ping 导致被杀)
+		conn.SetReadDeadline(time.Now().Add(pongWait))
+		
 		var incoming cluster.Message
 		if err := conn.ReadJSON(&incoming); err != nil {
 			log.Printf("Agent %s disconnected: %v", authPayload.ID, err)

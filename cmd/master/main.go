@@ -19,6 +19,7 @@ type Config struct {
 	WebAddr    string     `yaml:"web_addr"`
 	PublicAddr string     `yaml:"public_addr"` // 外部访问地址 (用于生成连接命令)
 	DataDir    string     `yaml:"data_dir"`
+	EnableUFW  bool       `yaml:"enable_ufw"`
 	Auth       AuthConfig `yaml:"auth"`
 }
 
@@ -38,6 +39,7 @@ func main() {
 		WebAddr:    ":9090",
 		PublicAddr: "localhost:9090",
 		DataDir:    "./data",
+		EnableUFW:  true,
 	}
 
 	// Load Config File
@@ -69,7 +71,7 @@ func main() {
 	)
 
 	// Initialize Cluster Hub
-	hub := cluster.NewHub(absDataDir)
+	hub := cluster.NewHub(absDataDir, config.EnableUFW)
 
 	// Initialize Web Server
 	server := web.NewServer(authMgr, hub, config.PublicAddr) // Engine is nil because Master doesn't forward

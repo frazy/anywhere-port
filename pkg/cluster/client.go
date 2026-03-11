@@ -26,13 +26,14 @@ type Client struct {
 	// 静态指标存储
 	OS        string
 	CPUModel  string
+	CPUCores  int
 	MemTotal  uint64
 	DiskTotal uint64
 
 	conn *websocket.Conn
 	mu   sync.Mutex
 
-	OnRulesSync func([]ForwardRule)
+	OnRulesSync func(SyncRulesPayload)
 	OnHeartbeat func() HeartbeatPayload
 }
 
@@ -46,9 +47,10 @@ func NewClient(masterAddr, agentID, token, version string) *Client {
 }
 
 // SetStaticInfo 设置握手上报的静态信息
-func (c *Client) SetStaticInfo(os, cpu string, mem, disk uint64) {
+func (c *Client) SetStaticInfo(os, cpu string, cores int, mem, disk uint64) {
 	c.OS = os
 	c.CPUModel = cpu
+	c.CPUCores = cores
 	c.MemTotal = mem
 	c.DiskTotal = disk
 }
@@ -80,6 +82,7 @@ func (c *Client) Start(ctx context.Context) {
 }
 
 func (c *Client) connect(ctx context.Context) error {
+	log.Printf("[DEBUG WS] Start connect() logic for MasterAddr: %s", c.MasterAddr)
 	// 智能解析 MasterAddr 协议
 	targetUrl := c.MasterAddr
 	// 如果没有协议头，默认为 ws://
@@ -105,11 +108,14 @@ func (c *Client) connect(ctx context.Context) error {
 
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, u.String(), nil)
 	if err != nil {
+		log.Printf("[DEBUG WS] DialContext error: %v", err)
 		return err
 	}
+	log.Printf("[DEBUG WS] DialContext SUCCESS, saving conn...")
 	c.conn = conn
 
 	// 1. 发送 Auth
+	log.Printf("[DEBUG WS] Sending Auth Payload for AgentID: %s", c.AgentID)
 	authMsg := Message{
 		Type: MsgAuth,
 		Payload: AuthPayload{
@@ -118,6 +124,7 @@ func (c *Client) connect(ctx context.Context) error {
 			Version:   c.Version,
 			OS:        c.OS,
 			CPUModel:  c.CPUModel,
+			CPUCores:  c.CPUCores,
 			MemTotal:  c.MemTotal,
 			DiskTotal: c.DiskTotal,
 		},
@@ -139,7 +146,14 @@ func (c *Client) run(ctx context.Context) {
 
 	errCh := make(chan error, 1)
 
-	// 读循环
+	// 读循环，配合 30s 的 Pong 检测
+	const pongWait = 30 * time.Second
+	c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.conn.SetPongHandler(func(string) error {
+		c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
 	go func() {
 		for {
 			var msg Message
@@ -160,7 +174,7 @@ func (c *Client) run(ctx context.Context) {
 			log.Printf("Read error: %v", err)
 			return
 		case <-ticker.C:
-			// 发送心跳 (使用 Send 方法确保线程安全)
+			// 发送应用层心跳 (使用 Send 方法确保线程安全)
 			var hb HeartbeatPayload
 			if c.OnHeartbeat != nil {
 				hb = c.OnHeartbeat()
@@ -173,6 +187,15 @@ func (c *Client) run(ctx context.Context) {
 				log.Printf("Heartbeat failed: %v", err)
 				return
 			}
+			
+			// 发送底层 Ping 以保活 WebSocket
+			c.mu.Lock()
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				c.mu.Unlock()
+				log.Printf("Ping message failed: %v", err)
+				return
+			}
+			c.mu.Unlock()
 		}
 	}
 }
@@ -184,7 +207,7 @@ func (c *Client) handleMessage(msg Message) {
 		pBytes, _ := json.Marshal(msg.Payload)
 		if err := json.Unmarshal(pBytes, &payload); err == nil {
 			if c.OnRulesSync != nil {
-				c.OnRulesSync(payload.Rules)
+				c.OnRulesSync(payload)
 			}
 		}
 	case MsgAuthFailed:

@@ -60,10 +60,13 @@ func main() {
 	rulesPath := filepath.Join("data", fmt.Sprintf("agent_rules_%s.json", *agentID))
 	statsPath := filepath.Join("data", fmt.Sprintf("agent_stats_%s.json", *agentID))
 
+	log.Printf("[DEBUG] Loading Engine Data...")
 	engine := forward.NewEngine(rulesPath, statsPath)
 	if err := engine.LoadData(); err != nil {
 		log.Printf("Info: No existing stats found or failed to load: %v", err)
 	}
+
+	log.Printf("[DEBUG] Initializing Cluster Client...")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -75,27 +78,38 @@ func main() {
 	client := cluster.NewClient(*masterAddr, *agentID, *token, Version)
 
 	// 采集静态信息 (Auth 时上报)
+	log.Printf("[DEBUG] Gathering Static OS Info...")
 	staticOS := getOSPrettyName()
 	staticCPU := "unknown"
+	var staticCores int
 	var staticMem uint64
 	var staticDisk uint64
 
+	log.Printf("[DEBUG] Gathering CPU Info...")
 	if ci, err := cpu.Info(); err == nil && len(ci) > 0 {
 		staticCPU = ci[0].ModelName
+	}
+	if cores, err := cpu.Counts(true); err == nil {
+		staticCores = cores
 	}
 	if v, err := mem.VirtualMemory(); err == nil {
 		staticMem = v.Total / 1024 / 1024
 	}
+	log.Printf("[DEBUG] Gathering Disk Info...")
 	if d, err := disk.Usage("/"); err == nil {
 		staticDisk = d.Total / 1024 / 1024
 	}
-	client.SetStaticInfo(staticOS, staticCPU, staticMem, staticDisk)
+	log.Printf("[DEBUG] Setting Static Info...")
+	client.SetStaticInfo(staticOS, staticCPU, staticCores, staticMem, staticDisk)
 
 	// 设置回调：规则同步
-	client.OnRulesSync = func(rules []cluster.ForwardRule) {
-		log.Printf("Received %d rules from Master, syncing...", len(rules))
-		engineConfigs := make([]forward.RuleConfig, 0, len(rules))
-		for _, r := range rules {
+	client.OnRulesSync = func(payload cluster.SyncRulesPayload) {
+		log.Printf("Received %d rules from Master, syncing...", len(payload.Rules))
+		
+		engine.SetUFWEnabled(payload.EnableUFW)
+		
+		engineConfigs := make([]forward.RuleConfig, 0, len(payload.Rules))
+		for _, r := range payload.Rules {
 			engineConfigs = append(engineConfigs, forward.RuleConfig{
 				ID:          r.ID,
 				ListenAddr:  r.ListenAddr,
@@ -136,9 +150,11 @@ func main() {
 	}
 
 	// 3. 运行客户端
+	log.Printf("[DEBUG] Launching client.Start goroutine...")
 	go client.Start(ctx)
 
 	// 4. 定期上报流量统计 (stats.json 的内容也会通过 websocket 上传给 Master)
+	log.Printf("[DEBUG] Launching Stats Report goroutine...")
 	go func() {
 		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()

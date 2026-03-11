@@ -46,9 +46,11 @@ type Hub struct {
 	configs  map[string]NodeConfig  // 节点静态配置 (ID -> Config)
 	stats    map[string]NodeStats   // 节点动态状态 (ID -> Stats)
 	allRules map[string]ForwardRule // 所有节点的规则 (ID -> Rule)
+	
+	EnableUFW bool 
 }
 
-func NewHub(dataDir string) *Hub {
+func NewHub(dataDir string, enableUFW bool) *Hub {
 	h := &Hub{
 		agents:      make(map[string]*Agent),
 		configs:     make(map[string]NodeConfig),
@@ -59,6 +61,7 @@ func NewHub(dataDir string) *Hub {
 		InfosPath:   filepath.Join(dataDir, "nodes_infos.json"),
 		TrafficPath: filepath.Join(dataDir, "stats.json"),
 		RulesPath:   filepath.Join(dataDir, "rules.json"),
+		EnableUFW:   enableUFW,
 	}
 	h.loadData()
 
@@ -94,19 +97,23 @@ func (h *Hub) Register(conn *websocket.Conn, clientIP string, auth AuthPayload) 
 
 	// [Conflict Detection]
 	if oldAgent, exists := h.agents[auth.ID]; exists {
-		// clientIP 优先使用外部传入的 (即 header 中的)，如果没有则从 conn 获取
 		finalIP := clientIP
 		if finalIP == "" {
 			finalIP = getIPFromAddr(conn.RemoteAddr().String())
 		}
-		oldIP := oldAgent.Info.IP // Use stored IP
+		oldIP := oldAgent.Info.IP
 
+		// 安全顶号: 既然 Token 已经校验通过 (前面的 if config.Token != auth.Token 已拦截盗用)
+		// 说明确系该节点因网络抖动或容器重启重新拨号。
+		// 在此场景下，如果旧的 goroutine 还没有收到 EOF，那么强制 Close 旧连接将其踢出。
 		if finalIP != oldIP {
-			log.Printf("[Security] ID Conflict blocked: %s (New: %s, Old: %s)", auth.ID, finalIP, oldIP)
-			_ = conn.WriteJSON(Message{Type: MsgAuthFailed, Payload: "ID already in use by another IP"})
-			return nil
+			log.Printf("Agent ID %s IP changed (Old: %s, New: %s), kicking out old connection", auth.ID, oldIP, finalIP)
+		} else {
+			log.Printf("Agent ID %s reconnected from same IP: %s, kicking out dead connection", auth.ID, oldIP)
 		}
-		log.Printf("Agent reconnected from same IP: %s", auth.ID)
+		
+		// 强制关闭旧连接，使其在协程里通过 Unregister 自动清理
+		oldAgent.Conn.Close()
 	}
 
 	// 更新或初始化状态
@@ -126,6 +133,7 @@ func (h *Hub) Register(conn *websocket.Conn, clientIP string, auth AuthPayload) 
 	// 存储静态指纹
 	stats.OSVersion = auth.OS
 	stats.CPUModel = auth.CPUModel
+	stats.CPUCores = auth.CPUCores
 	stats.MemTotal = auth.MemTotal
 	stats.DiskTotal = auth.DiskTotal
 
@@ -220,6 +228,42 @@ func (h *Hub) ResetNodeToken(id string) (string, error) {
 	return newToken, nil
 }
 
+// DeleteNode 彻底删除一个节点及其名下的所有规则
+func (h *Hub) DeleteNode(id string) error {
+	h.mu.Lock()
+	if _, exists := h.configs[id]; !exists {
+		h.mu.Unlock()
+		return fmt.Errorf("node not found")
+	}
+
+	// 1. 强制断开当前活动连接
+	if agent, ok := h.agents[id]; ok {
+		agent.Conn.Close()
+		delete(h.agents, id)
+	}
+
+	// 2. 删除预注册配置和状态统计
+	delete(h.configs, id)
+	delete(h.stats, id)
+
+	// 3. 级联删除该节点名下的所有规则
+	rulesToRemove := make([]string, 0)
+	for ruleID, r := range h.allRules {
+		if r.NodeID == id {
+			rulesToRemove = append(rulesToRemove, ruleID)
+		}
+	}
+	for _, rid := range rulesToRemove {
+		delete(h.allRules, rid)
+	}
+	h.mu.Unlock()
+
+	// 4. 持久化清理后的最新内存台账
+	h.SaveData()
+	go h.PushBackupsToNodes()
+	return nil
+}
+
 func generateRandomToken(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, length)
@@ -247,11 +291,16 @@ func getIPFromAddr(addr string) string {
 }
 
 // Unregister 注销 Agent
-func (h *Hub) Unregister(id string) {
+func (h *Hub) Unregister(id string, conn *websocket.Conn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	if agent, ok := h.agents[id]; ok {
+		// 防顶号误杀: 如果 Hub 中的连接已经不是当前要求注销的连接，说明该注销是旧连接 (被顶掉的) 发起的
+		if conn != nil && agent.Conn != conn {
+			return
+		}
+
 		agent.Conn.Close()
 		delete(h.agents, id)
 
@@ -338,7 +387,8 @@ func (h *Hub) SyncRulesToAgent(nodeID string) {
 	msg := Message{
 		Type: MsgSyncRules,
 		Payload: SyncRulesPayload{
-			Rules: rules,
+			Rules:     rules,
+			EnableUFW: h.EnableUFW,
 		},
 	}
 	agent.Send(msg)
@@ -380,8 +430,9 @@ func (h *Hub) UpdateRulesStats(nodeID string, report StatsReportPayload) {
 		if rule, ok := h.allRules[ruleID]; ok {
 			// Agent 上报的是该规则的总已用流量
 			totalUsed := stats.UpBytes + stats.DownBytes
-			if rule.UsedTraffic != totalUsed {
+			if rule.UsedTraffic != totalUsed || rule.Error != stats.Error {
 				rule.UsedTraffic = totalUsed
+				rule.Error = stats.Error
 				h.allRules[ruleID] = rule
 				updated = true
 			}
@@ -473,7 +524,7 @@ func (h *Hub) saveDataLocked() {
 		configList = append(configList, cfg)
 	}
 	nb, _ := json.MarshalIndent(configList, "", "  ")
-	os.WriteFile(h.NodesPath, nb, 0644)
+	atomicWriteFile(h.NodesPath, nb, 0644)
 
 	// 保存节点状态 (实时数据)
 	statsList := make([]NodeStatsMap, 0, len(h.stats))
@@ -481,7 +532,7 @@ func (h *Hub) saveDataLocked() {
 		statsList = append(statsList, NodeStatsMap{ID: id, Stats: s})
 	}
 	sb, _ := json.MarshalIndent(statsList, "", "  ")
-	os.WriteFile(h.InfosPath, sb, 0644)
+	atomicWriteFile(h.InfosPath, sb, 0644)
 
 	// 保存规则
 	ruleList := make([]ForwardRule, 0, len(h.allRules))
@@ -497,10 +548,19 @@ func (h *Hub) saveDataLocked() {
 		})
 	}
 	rb, _ := json.MarshalIndent(ruleList, "", "  ")
-	os.WriteFile(h.RulesPath, rb, 0644)
+	atomicWriteFile(h.RulesPath, rb, 0644)
 
 	tb, _ := json.MarshalIndent(trafficList, "", "  ")
-	os.WriteFile(h.TrafficPath, tb, 0644)
+	atomicWriteFile(h.TrafficPath, tb, 0644)
+}
+
+// atomicWriteFile 通过先写同目录临时文件后重命名(Rename)的操作来确保文件原子完整性，以防保存中断导致 JSON 内容损坏截断。
+func atomicWriteFile(filename string, data []byte, perm os.FileMode) error {
+	tmpFile := filename + ".tmp"
+	if err := os.WriteFile(tmpFile, data, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmpFile, filename)
 }
 
 func (h *Hub) AddRule(r ForwardRule) {
